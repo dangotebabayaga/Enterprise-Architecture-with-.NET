@@ -1,0 +1,177 @@
+@page "/my-books"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@attribute [Authorize(Roles = "author")]
+@inject IHttpClientFactory HttpFactory
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Mes Livres</PageTitle>
+
+<h1>Mes Livres</h1>
+
+@if (isLoading)
+{
+    <p><em>Chargement...</em></p>
+}
+else if (authorProfile == null)
+{
+    <div class="alert alert-warning">
+        <p>Votre compte utilisateur n'est pas encore lié à un profil auteur.</p>
+        <p>Veuillez contacter un éditeur pour qu'il associe votre compte à votre profil auteur.</p>
+    </div>
+}
+else if (myBooks == null || !myBooks.Any())
+{
+    <div class="alert alert-info">
+        <p>Aucun livre ne vous a encore été assigné.</p>
+        <p>Les éditeurs vous contacteront lorsqu'un projet de livre correspondant à vos compétences sera disponible.</p>
+    </div>
+}
+else
+{
+    <div class="container">
+        <div class="row mb-3">
+            <div class="col">
+                <div class="card bg-light">
+                    <div class="card-body">
+                        <h5>Profil Auteur</h5>
+                        <p><strong>@authorProfile.FirstName @authorProfile.LastName</strong></p>
+                        <p>@authorProfile.UserEmailAddress</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <h3>Livres assignés</h3>
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Titre</th>
+                    <th>Technologie</th>
+                    <th>Statut</th>
+                    <th>Date publication prévue</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var book in myBooks)
+                {
+                    <tr>
+                        <td>@book.Title</td>
+                        <td>@book.MainTechnoTag</td>
+                        <td>
+                            <span class="badge @GetStatusBadgeClass(book.Editing?.Status?.Value)">
+                                @GetStatusLabel(book.Editing?.Status?.Value)
+                            </span>
+                        </td>
+                        <td>@book.PlannedPublishDate?.ToString("dd/MM/yyyy")</td>
+                        <td>
+                            @if (book.Editing?.Status?.Value == "validation")
+                            {
+                                <a href="/validations" class="btn btn-sm btn-info">Voir validations</a>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private bool isLoading = true;
+    private DTO.Author? authorProfile;
+    private List<DTO.Book>? myBooks;
+    private string? currentUserId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        // Chercher l'ID utilisateur dans différents claims possibles
+        currentUserId = user.FindFirst("sub")?.Value
+            ?? user.FindFirst("oid")?.Value
+            ?? user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        // Debug: afficher tous les claims dans la console
+        Console.WriteLine("=== Claims utilisateur ===");
+        foreach (var claim in user.Claims)
+        {
+            Console.WriteLine($"  {claim.Type}: {claim.Value}");
+        }
+        Console.WriteLine($"=== ID trouvé: {currentUserId} ===");
+
+        if (string.IsNullOrEmpty(currentUserId))
+        {
+            isLoading = false;
+            return;
+        }
+
+        var authorsClient = HttpFactory.CreateClient("AuthorsAPI");
+        var booksClient = HttpFactory.CreateClient("BooksAPI");
+
+        try
+        {
+            // Chercher le profil auteur lié à ce compte Keycloak
+            var authors = await authorsClient.GetFromJsonAsync<List<DTO.Author>>("http://authors:82/Authors");
+
+            Console.WriteLine($"=== Auteurs récupérés: {authors?.Count ?? 0} ===");
+            if (authors != null)
+            {
+                foreach (var a in authors)
+                {
+                    Console.WriteLine($"  Auteur: {a.FirstName} {a.LastName}, KeycloakId: '{a.KeycloakUserId}'");
+                }
+            }
+
+            authorProfile = authors?.FirstOrDefault(a => a.KeycloakUserId == currentUserId);
+            Console.WriteLine($"=== Profil trouvé: {(authorProfile != null ? "OUI" : "NON")} ===");
+
+            if (authorProfile != null)
+            {
+                // Chercher les livres où cet auteur est assigné
+                var allBooks = await booksClient.GetFromJsonAsync<DTO.Book[]>("http://books:81/Books");
+                myBooks = allBooks?
+                    .Where(b => b.MainAuthorId == authorProfile.EntityId)
+                    .ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Erreur: {ex.Message}");
+        }
+
+        isLoading = false;
+    }
+
+    private string GetStatusBadgeClass(string? status)
+    {
+        return status switch
+        {
+            "draft" => "bg-secondary",
+            "search" => "bg-info",
+            "write" => "bg-primary",
+            "edit" => "bg-warning",
+            "validation" => "bg-warning",
+            "sell" => "bg-success",
+            "archived" => "bg-dark",
+            _ => "bg-secondary"
+        };
+    }
+
+    private string GetStatusLabel(string? status)
+    {
+        return status switch
+        {
+            "draft" => "Brouillon",
+            "search" => "Recherche auteur",
+            "write" => "En écriture",
+            "edit" => "En édition",
+            "validation" => "En validation",
+            "sell" => "En vente",
+            "archived" => "Archivé",
+            _ => "Inconnu"
+        };
+    }
+}

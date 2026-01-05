@@ -41,6 +41,14 @@ public class Program
                 return handler;
             });
 
+        builder.Services
+            .AddHttpClient("MiddleOfficeAPI", client => client.BaseAddress = new Uri("http://middleoffice:83"))
+            .AddHttpMessageHandler(x => {
+                var handler = x.GetRequiredService<AuthorizationMessageHandler>()
+                    .ConfigureHandler(new[] { "http://middleoffice:83" });
+                return handler;
+            });
+
         builder.Services.AddOidcAuthentication(options =>
         {
             options.ProviderOptions.Authority = "http://iam:8088/realms/demoeditor/";

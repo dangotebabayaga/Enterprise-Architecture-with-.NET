@@ -6,6 +6,7 @@ public class Author
     public string? FirstName { get; set; }
     public string? LastName { get; set; }
     public string? UserEmailAddress { get; set; }
+    public string? KeycloakUserId { get; set; }
     public string? Restriction { get; set; }
     public ContactsPetal? Contacts { get; set; }
 

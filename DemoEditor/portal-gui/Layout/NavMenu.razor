@@ -21,6 +21,14 @@
                         <span class="bi bi-person-nav-menu" aria-hidden="true"></span> Identity
                     </NavLink>
                 </div>
+                @if (context.User.IsInRole("author"))
+                {
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="my-books">
+                            <span class="bi bi-book-nav-menu" aria-hidden="true"></span> Mes Livres
+                        </NavLink>
+                    </div>
+                }
                 @if (context.User.IsInRole("editor"))
                 {
                     <div class="nav-item px-3">
@@ -31,6 +39,14 @@
                     <div class="nav-item px-3">
                         <NavLink class="nav-link" href="authors">
                             <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Authors
+                        </NavLink>
+                    </div>
+                }
+                @if (context.User.IsInRole("editor") || context.User.IsInRole("quality_manager") || context.User.IsInRole("director"))
+                {
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="validations">
+                            <span class="bi bi-check-circle-nav-menu" aria-hidden="true"></span> Validations
                         </NavLink>
                     </div>
                 }

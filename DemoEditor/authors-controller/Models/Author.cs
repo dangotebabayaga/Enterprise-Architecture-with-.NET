@@ -27,6 +27,9 @@ public class Author
     [BsonElement("userEmailAddress")]
     public string? UserEmailAddress { get; set; }
 
+    [BsonElement("keycloakUserId")]
+    public string? KeycloakUserId { get; set; }
+
     [BsonElement("restriction")]
     public string? Restriction { get; set; }
 

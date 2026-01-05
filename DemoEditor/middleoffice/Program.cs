@@ -7,14 +7,37 @@ using MongoDB.Bson;
 using MongoDB.Driver;
 using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Serializers;
+using MongoDB.Bson.Serialization.Conventions;
 using Newtonsoft.Json.Serialization;
 using MiddleOffice.Models;
 using Polly;
 using Polly.Extensions.Http;
 using System.Net;
 using DemoEditor.Authorization;
+using MiddleOffice.Services;
+
+// Configuration globale MongoDB pour utiliser camelCase (correspondant aux noms de champs en base)
+var conventionPack = new ConventionPack { new CamelCaseElementNameConvention() };
+ConventionRegistry.Register("CamelCase", conventionPack, t => true);
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Configuration CORS pour autoriser les requêtes depuis le portail
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
+// Connexion MongoDB et service de validation
+var mongoClient = new MongoClient("mongodb://db:27017");
+var database = mongoClient.GetDatabase("middleoffice");
+builder.Services.AddSingleton(database);
+builder.Services.AddScoped<ValidationService>();
 
 builder.Services.AddAuthentication().AddJwtBearer(options => {
     options.RequireHttpsMetadata = false;
@@ -38,6 +61,8 @@ builder.Services.AddHttpClient("Actions").AddPolicyHandler(GetRetryPolicy());
 var app = builder.Build();
 
 app.UseHttpsRedirection();
+
+app.UseCors();
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -205,6 +230,60 @@ app.MapPut("/templates/{idTemplate}/status/archived", async (string idTemplate) 
 var objectSerializer = new ObjectSerializer(type => ObjectSerializer.DefaultAllowedTypes(type) || type.FullName.StartsWith("MiddleOffice.Models."));
 BsonSerializer.RegisterSerializer(objectSerializer);
 
+// ============================================
+// ENDPOINTS VALIDATION MULTI-ACTEURS
+// ============================================
+
+app.MapPost("/validation-requests", async (ValidationService service, HttpContext context, [FromBody] CreateValidationRequestDto dto) => {
+    var userId = context.User.FindFirst("sub")?.Value ?? "unknown";
+    var request = await service.CreateValidationRequest(dto.TemplateId, dto.BookId, dto.BookTitle, userId, dto.Message);
+    return Results.Created($"/validation-requests/{request.EntityId}", request);
+})
+.RequireAuthorization("editor");
+
+app.MapGet("/validation-requests/{requestId}", async (ValidationService service, string requestId) => {
+    var request = await service.GetValidationRequest(requestId);
+    if (request == null) return Results.NotFound("Demande introuvable");
+    return Results.Ok(request);
+})
+.RequireAuthorization();
+
+app.MapGet("/validation-requests/pending/{role}", async (ValidationService service, string role) => {
+    var requests = await service.GetPendingRequestsForRole(role);
+    return Results.Ok(requests);
+})
+.RequireAuthorization();
+
+app.MapGet("/books/{bookId}/validation-requests", async (ValidationService service, string bookId) => {
+    var requests = await service.GetRequestsForBook(bookId);
+    return Results.Ok(requests);
+})
+.RequireAuthorization();
+
+app.MapPost("/validation-requests/{requestId}/validators/{validatorId}/approve", async (
+    ValidationService service, HttpContext context, string requestId, string validatorId, [FromBody] DecisionDto? dto) => {
+    var userId = context.User.FindFirst("sub")?.Value ?? "unknown";
+    try {
+        var request = await service.RecordDecision(requestId, validatorId, "approved", userId, dto?.Comment);
+        return Results.Ok(request);
+    } catch (InvalidOperationException ex) {
+        return Results.BadRequest(ex.Message);
+    }
+})
+.RequireAuthorization();
+
+app.MapPost("/validation-requests/{requestId}/validators/{validatorId}/reject", async (
+    ValidationService service, HttpContext context, string requestId, string validatorId, [FromBody] DecisionDto? dto) => {
+    var userId = context.User.FindFirst("sub")?.Value ?? "unknown";
+    try {
+        var request = await service.RecordDecision(requestId, validatorId, "rejected", userId, dto?.Comment);
+        return Results.Ok(request);
+    } catch (InvalidOperationException ex) {
+        return Results.BadRequest(ex.Message);
+    }
+})
+.RequireAuthorization();
+
 app.Run();
 
 static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy()
@@ -214,3 +293,6 @@ static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy()
         .OrResult(msg => msg.StatusCode == HttpStatusCode.NotFound)
         .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(0.1));
 }
+
+public record CreateValidationRequestDto(string TemplateId, string BookId, string? BookTitle, string? Message);
+public record DecisionDto(string? Comment);

@@ -107,9 +107,24 @@ else
                 <span><button class="btn btn-primary" @onclick="HandleSubmit">Save</button></span>
                 <span><button class="btn btn-primary" @onclick="NextStep">Save and go to next step</button></span>
             </div>
-            
+
             <h2>
-                <span>Step 5 [sell]: commercialize book</span>
+                <span>Step 5 [validation]: validation multi-acteurs</span>
+                @if (IsCurrentStep("validation")) { <span><b> (CURRENT STEP)</b></span> }
+            </h2>
+            <div hidden='@(!IsCurrentStep("validation"))'>
+                <div class="alert alert-info">
+                    <p><strong>Validation en cours</strong></p>
+                    <p>Le livre doit être validé par les responsables avant publication.</p>
+                    <p>Utilisez la page <a href="/validations">Validations</a> pour suivre l'état des approbations.</p>
+                </div>
+                <button class="btn btn-success" @onclick="NextStep" disabled="@(!AllValidationsApproved)">
+                    Toutes les validations sont approuvées - Passer à la vente
+                </button>
+            </div>
+
+            <h2>
+                <span>Step 6 [sell]: commercialize book</span>
                 @if (IsCurrentStep("sell")) { <span><b> (CURRENT STEP)</b></span> }
             </h2>
             <div class="col-md-4">
@@ -133,7 +148,7 @@ else
             </div>
             
             <h2>
-                <span>Step 6 [archived]: book is not active anymore</span>
+                <span>Step 7 [archived]: book is not active anymore</span>
                 @if (IsCurrentStep("archived")) { <span><b> (CURRENT STEP)</b></span> }
             </h2>
         </EditForm>
@@ -156,6 +171,8 @@ else
 
     private HttpClient authorsClient = null;
 
+    private HttpClient middleOfficeClient = null;
+
     public class DropItem
     {
         public string Identifier { get; set; }
@@ -165,6 +182,8 @@ else
     }
 
     private List<DropItem> authorsDropItems = new List<DropItem>();
+
+    private bool AllValidationsApproved = false;
 
     private bool IsCurrentStep(string step)
     {
@@ -196,6 +215,8 @@ else
 
         authorsClient = HttpFactory.CreateClient("AuthorsAPI");
         authorsList = await authorsClient.GetFromJsonAsync<DTO.Author[]>(@"http://authors:82/Authors");
+
+        middleOfficeClient = HttpFactory.CreateClient("MiddleOfficeAPI");
     }
 
     protected async void HandleSubmit()
@@ -229,7 +250,8 @@ else
             case "draft": nextValue = "search"; break;
             case "search": nextValue = "write"; break;
             case "write": nextValue = "edit"; break;
-            case "edit": nextValue = "sell"; break;
+            case "edit": nextValue = "validation"; break;
+            case "validation": nextValue = "sell"; break;
             case "sell": nextValue = "archived"; break;
             default: throw new NotSupportedException("Invalid book status value: " + currentBook.Editing.Status.Value);
         }
@@ -251,6 +273,19 @@ else
                         Email = author.UserEmailAddress
                     });
             }
+        }
+
+        // Création automatique d'une demande de validation multi-acteurs
+        if (currentBook.Editing.Status.Value == "validation")
+        {
+            var validationDto = new
+            {
+                TemplateId = "book-publication-validation",
+                BookId = currentBook.EntityId,
+                BookTitle = currentBook.Title,
+                Message = $"Demande de validation pour le livre '{currentBook.Title}'"
+            };
+            await middleOfficeClient.PostAsJsonAsync("http://middleoffice:83/validation-requests", validationDto);
         }
 
         StateHasChanged(); // TODO: check if useful

@@ -28,6 +28,10 @@ public class Template
 
     [BsonElement("status")]
     public string Status { get; set; } = "active";
+
+    // Liste des validateurs requis pour ce template (validation multi-acteurs)
+    [BsonElement("requiredValidators")]
+    public List<ValidatorRequirement> RequiredValidators { get; set; } = new();
 }
 
 public class Field
@@ -47,4 +51,29 @@ public class Field
 
     [BsonElement("visible")]
     public bool Visible { get; set; } = true;
+}
+
+/// <summary>
+/// Définit un validateur requis dans un template.
+/// Utilisé pour configurer les rôles qui doivent approuver une demande.
+/// </summary>
+public class ValidatorRequirement
+{
+    // Rôle Keycloak requis pour effectuer cette validation
+    [BsonElement("role")]
+    [Required(ErrorMessage = "Le rôle du validateur est obligatoire")]
+    public string Role { get; set; }
+
+    // Titre affiché dans l'interface (multilingue)
+    [BsonElement("title")]
+    public List<InternationalizedString> Title { get; set; } = new();
+
+    // Ordre de validation (1 = premier, 2 = après, etc.)
+    // Les validateurs du même ordre peuvent valider en parallèle
+    [BsonElement("order")]
+    public int Order { get; set; } = 1;
+
+    // Si true, cette validation est obligatoire pour approuver la demande
+    [BsonElement("mandatory")]
+    public bool Mandatory { get; set; } = true;
 }

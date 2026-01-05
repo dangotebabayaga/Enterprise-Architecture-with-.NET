@@ -1,0 +1,178 @@
+@page "/validations"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@attribute [Authorize]
+@inject IHttpClientFactory HttpFactory
+@inject NavigationManager Navigator
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Validations</PageTitle>
+
+<h1>Mes validations en attente</h1>
+
+@if (pendingRequests == null)
+{
+    <p><em>Chargement...</em></p>
+}
+else if (!pendingRequests.Any())
+{
+    <div class="alert alert-success">Aucune validation en attente.</div>
+}
+else
+{
+    <div class="container">
+        @foreach (var request in pendingRequests)
+        {
+            <div class="card mb-3">
+                <div class="card-header">
+                    <strong>@request.BookTitle</strong>
+                    <span class="badge bg-warning float-end">En attente</span>
+                </div>
+                <div class="card-body">
+                    <p><small>Demande créée le @request.CreatedAt.ToString("dd/MM/yyyy HH:mm")</small></p>
+                    @if (!string.IsNullOrEmpty(request.RequestMessage))
+                    {
+                        <p><em>@request.RequestMessage</em></p>
+                    }
+
+                    <h6>État des validations :</h6>
+                    <ul class="list-group mb-3">
+                        @foreach (var validator in request.Validators)
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                @validator.DisplayName (@validator.Role)
+                                @if (validator.Status == "pending")
+                                {
+                                    <span class="badge bg-secondary">En attente</span>
+                                }
+                                else if (validator.Status == "approved")
+                                {
+                                    <span class="badge bg-success">Approuvé</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-danger">Rejeté</span>
+                                }
+                            </li>
+                        }
+                    </ul>
+
+                    @foreach (var validator in request.Validators.Where(v => v.Status == "pending" && CanValidate(v.Role)))
+                    {
+                        <div class="mt-2">
+                            <div class="input-group">
+                                <input type="text" class="form-control" placeholder="Commentaire (optionnel)"
+                                       @bind="commentaire" />
+                                <button class="btn btn-success" @onclick="() => Approve(request.EntityId, validator.Id)">
+                                    Approuver
+                                </button>
+                                <button class="btn btn-danger" @onclick="() => Reject(request.EntityId, validator.Id)">
+                                    Rejeter
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<ValidationRequestDto> pendingRequests;
+    private HttpClient client;
+    private string commentaire = "";
+    private List<string> userRoles = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        client = HttpFactory.CreateClient("MiddleOfficeAPI");
+        await LoadUserRoles();
+        await LoadPendingRequests();
+    }
+
+    private async Task LoadUserRoles()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        userRoles = new List<string>();
+
+        // Récupère les rôles depuis les claims de l'utilisateur
+        foreach (var claim in user.Claims)
+        {
+            // Les rôles peuvent être dans différents claims selon la config Keycloak
+            if (claim.Type == "realm_access.roles" ||
+                claim.Type == "role" ||
+                claim.Type.EndsWith("/role") ||
+                claim.Type == System.Security.Claims.ClaimTypes.Role)
+            {
+                userRoles.Add(claim.Value);
+            }
+        }
+    }
+
+    private async Task LoadPendingRequests()
+    {
+        pendingRequests = new List<ValidationRequestDto>();
+        foreach (var role in userRoles)
+        {
+            try
+            {
+                var requests = await client.GetFromJsonAsync<List<ValidationRequestDto>>($"http://middleoffice:83/validation-requests/pending/{role}");
+                if (requests != null)
+                {
+                    foreach (var req in requests)
+                    {
+                        if (!pendingRequests.Any(r => r.EntityId == req.EntityId))
+                            pendingRequests.Add(req);
+                    }
+                }
+            }
+            catch { }
+        }
+    }
+
+    private bool CanValidate(string role)
+    {
+        return userRoles.Contains(role);
+    }
+
+    private async Task Approve(string requestId, string validatorId)
+    {
+        var dto = new { Comment = commentaire };
+        await client.PostAsJsonAsync($"http://middleoffice:83/validation-requests/{requestId}/validators/{validatorId}/approve", dto);
+        commentaire = "";
+        await LoadPendingRequests();
+        StateHasChanged();
+    }
+
+    private async Task Reject(string requestId, string validatorId)
+    {
+        var dto = new { Comment = commentaire };
+        await client.PostAsJsonAsync($"http://middleoffice:83/validation-requests/{requestId}/validators/{validatorId}/reject", dto);
+        commentaire = "";
+        await LoadPendingRequests();
+        StateHasChanged();
+    }
+
+    public class ValidationRequestDto
+    {
+        public string EntityId { get; set; }
+        public string BookId { get; set; }
+        public string BookTitle { get; set; }
+        public string Status { get; set; }
+        public string RequestMessage { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public List<ValidatorDto> Validators { get; set; } = new();
+    }
+
+    public class ValidatorDto
+    {
+        public string Id { get; set; }
+        public string Role { get; set; }
+        public string DisplayName { get; set; }
+        public string Status { get; set; }
+        public string Comment { get; set; }
+    }
+}
